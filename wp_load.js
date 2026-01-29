@@ -74,6 +74,105 @@ export default function () {
 
     sleep(1);
 }
+//Самый верный вариант по ТЕСТИРОВАНИЮ по моей тоске зрения
+import http from 'k6/http';
+import { sleep, check } from 'k6';
+
+export const options = {
+    stages: [
+        { duration: '30s', target: 20 },
+        { duration: '1m', target: 50 },
+        { duration: '20s', target: 0 },
+    ],
+    thresholds: {
+        // Если более 1% запросов упало (не 200 OK) — тест считается проваленным
+        http_req_failed: ['rate<0.01'],
+        // 95% запросов должны быть быстрее 2 секунд (учитывая тяжесть WP)
+        http_req_duration: ['p(95)<2000'],
+    },
+};
+
+export default function () {
+    const params = {
+        headers: {
+            'User-Agent': 'k6-performance-audit-v1',
+            'X-Target-SLA': '2000ms',
+            'Accept-Encoding': 'gzip, deflate',
+        },
+        // Ограничим время ожидания, чтобы один "зависший" запрос не портил всю статистику
+        timeout: '10s',
+    };
+
+    const res = http.get('https://www.kisit.kneu.edu.ua/', params);
+
+    // Проверки (Checks) — они не валят тест сами, но отображаются в отчете
+    check(res, {
+        'status is 200': (r) => r.status === 200,
+        'protocol is HTTP/2': (r) => r.proto === 'HTTP/2.0' || r.proto === 'h2',
+        'body contains WordPress': (r) => r.body.includes('wp-content'),
+    });
+
+    // Имитируем "время на чтение" (Think Time)
+    sleep(Math.random() * 2 + 1);
+}
+// амый НЕВЕРНЫЙ худшый (предупреждение описано в ридми )это для обучения на месте https://www.kisit.kneu.edu.ua/
+// Мог быть ваш сайт
+import http from 'k6/http';
+import { sleep, check } from 'k6';
+import { randomString } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
+
+export const options = {
+    scenarios: {
+        // Сценарий 1: Медленные "зомби" соединения
+        slow_clients: {
+            executor: 'constant-vus',
+            vus: 30,
+            duration: '2m',
+        },
+        // Сценарий 2: Тяжелые поисковые запросы (удар по MySQL)
+        db_stress: {
+            executor: 'ramping-vus',
+            startVUs: 0,
+            stages: [
+                { duration: '1m', target: 20 },
+                { duration: '2m', target: 40 },
+                { duration: '1m', target: 0 },
+            ],
+            gracefulRampDown: '30s',
+        },
+    },
+    thresholds: {
+        'http_req_duration': ['p(99)>10000'], // Мы хотим увидеть, когда задержка уйдет за 10 сек
+    },
+};
+
+export default function () {
+    const url = 'https://www.kisit.kneu.edu.ua/';
+
+    // 1. Имитируем поиск по случайным строкам.
+    // WordPress будет пытаться найти это в БД через LIKE %...%, что крайне тяжело.
+    const searchQuery = randomString(5);
+    const searchUrl = `${url}?s=${searchQuery}`;
+
+    const params = {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Performance-Test-Bot',
+            'X-Purpose': 'Educational-Audit',
+            'Cache-Control': 'no-cache', // Заставляем сервер не отдавать кэш, а считать заново
+        },
+        timeout: '60s',
+    };
+
+    const res = http.get(searchUrl, params);
+
+    check(res, {
+        'is status 200': (r) => r.status === 200,
+        'is slow response': (r) => r.timings.duration > 1000, // Логируем медленные ответы
+    });
+
+    // 2. Slowloris-эффект: держим соединение
+    sleep(Math.random() * 5 + 2);
+}
 // Атаки выглядят так:
 //
 //     0 → 5000 RPS за 1 секунду
